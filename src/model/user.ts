@@ -19,6 +19,8 @@ export interface UserNode {
     readonly follows_viewer: boolean;
     readonly requested_by_viewer: boolean;
     readonly reel: Reel;
+    // --- ADDED: follower count (fetched on demand) ---
+    follower_count?: number; // undefined = not fetched yet
 }
 
 export interface Reel {
