@@ -10,7 +10,7 @@ import {
 import { State } from "../model/state";
 import { UserNode } from "../model/user";
 import { WHITELISTED_RESULTS_STORAGE_KEY, TIME_BETWEEN_PROFILE_FETCHES } from "../constants/constants";
-import { PrivateFilterOption } from "../model/scanning-filter";
+import { PrivateFilterOption, SortOrder } from "../model/scanning-filter";
 
 export interface SearchingProps {
     state: State;
@@ -55,8 +55,6 @@ export const Searching = ({
         if (state.status !== "scanning") return;
 
         const usersOnPage = getCurrentPageUnfollowers(usersForDisplay, state.page);
-
-        // Only check users that haven't been checked yet
         const usersToCheck = usersOnPage.filter(u => u.follower_count === undefined);
 
         if (usersToCheck.length === 0) {
@@ -83,13 +81,11 @@ export const Searching = ({
 
             setCheckedCount(i + 1);
 
-            // Delay between requests to avoid rate limiting
             if (i < usersToCheck.length - 1) {
                 await sleep(TIME_BETWEEN_PROFILE_FETCHES);
             }
         }
 
-        // Update global state with enriched results
         setState({
             ...state,
             results: updatedResults,
@@ -111,7 +107,7 @@ export const Searching = ({
         });
     };
 
-    // ADDED: Handler for private filter select change
+    // Handler for private filter select change
     const handlePrivateFilterChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         if (state.status !== "scanning") return;
 
@@ -131,11 +127,46 @@ export const Searching = ({
         });
     };
 
+    // Handler for sort order select change
+    const handleSortOrderChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        if (state.status !== "scanning") return;
+
+        setState({
+            ...state,
+            page: 1, // Reset to page 1 when changing sort
+            filter: {
+                ...state.filter,
+                sortOrder: e.currentTarget.value as SortOrder,
+            },
+        });
+    };
+
+    const isAlphabetical = state.filter.sortOrder === "alphabetical";
     let currentLetter = "";
 
     const onNewLetter = (firstLetter: string) => {
         currentLetter = firstLetter;
         return <div className="alphabet-character">{currentLetter}</div>;
+    };
+
+    const selectStyle: React.CSSProperties = {
+        padding: "0.25rem 0.4rem",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: "6px",
+        background: "#1c1c1e",
+        color: "#fff",
+        fontSize: "0.85rem",
+        cursor: "pointer",
+    };
+
+    const inputStyle: React.CSSProperties = {
+        width: "80px",
+        padding: "0.3rem 0.5rem",
+        border: "1px solid rgba(255,255,255,0.12)",
+        borderRadius: "6px",
+        background: "#1c1c1e",
+        color: "#fff",
+        fontSize: "0.85rem",
     };
 
     return (
@@ -171,28 +202,19 @@ export const Searching = ({
                         &nbsp;Verified
                     </label>
 
-                    {/* CHANGED: Private filter - now a select with 3 options instead of checkbox */}
+                    {/* Private filter - select with 3 options */}
                     <label className="badge m-small" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                         Private:
                         <select
                             value={state.filter.privateFilter}
                             onChange={handlePrivateFilterChange}
-                            style={{
-                                padding: "0.25rem 0.4rem",
-                                border: "1px solid rgba(255,255,255,0.12)",
-                                borderRadius: "6px",
-                                background: "#1c1c1e",
-                                color: "#fff",
-                                fontSize: "0.85rem",
-                                cursor: "pointer",
-                            }}
+                            style={selectStyle}
                         >
                             <option value="all">All</option>
                             <option value="only_private">Only Private</option>
                             <option value="only_public">Only Public</option>
                         </select>
                     </label>
-                    {/* END CHANGED */}
 
                     <label className="badge m-small">
                         <input
@@ -202,6 +224,22 @@ export const Searching = ({
                             onChange={handleScanFilter}
                         />
                         &nbsp;Without Profile Picture
+                    </label>
+                </menu>
+
+                {/* Sort Order */}
+                <menu className="flex column m-clear p-clear" style={{ marginTop: "0.5rem" }}>
+                    <p>Sort Order</p>
+                    <label className="badge m-small" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                        <select
+                            value={state.filter.sortOrder}
+                            onChange={handleSortOrderChange}
+                            style={{ ...selectStyle, width: "100%" }}
+                        >
+                            <option value="alphabetical">A → Z</option>
+                            <option value="recent_first">Recent first</option>
+                            <option value="oldest_first">Oldest first</option>
+                        </select>
                     </label>
                 </menu>
 
@@ -216,15 +254,7 @@ export const Searching = ({
                             value={state.filter.minFollowers || ""}
                             placeholder="0"
                             onChange={e => handleFollowerFilterChange("minFollowers", e.currentTarget.value)}
-                            style={{
-                                width: "80px",
-                                padding: "0.3rem 0.5rem",
-                                border: "1px solid rgba(255,255,255,0.12)",
-                                borderRadius: "6px",
-                                background: "#1c1c1e",
-                                color: "#fff",
-                                fontSize: "0.85rem",
-                            }}
+                            style={inputStyle}
                         />
                     </label>
                     <label className="badge m-small" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
@@ -235,15 +265,7 @@ export const Searching = ({
                             value={state.filter.maxFollowers || ""}
                             placeholder="0 (no limit)"
                             onChange={e => handleFollowerFilterChange("maxFollowers", e.currentTarget.value)}
-                            style={{
-                                width: "80px",
-                                padding: "0.3rem 0.5rem",
-                                border: "1px solid rgba(255,255,255,0.12)",
-                                borderRadius: "6px",
-                                background: "#1c1c1e",
-                                color: "#fff",
-                                fontSize: "0.85rem",
-                            }}
+                            style={inputStyle}
                         />
                     </label>
                 </menu>
@@ -391,7 +413,8 @@ export const Searching = ({
                     const firstLetter = user.username.substring(0, 1).toUpperCase();
                     return (
                         <>
-                            {firstLetter !== currentLetter && onNewLetter(firstLetter)}
+                            {/* Only show alphabet dividers in alphabetical mode */}
+                            {isAlphabetical && firstLetter !== currentLetter && onNewLetter(firstLetter)}
                             <label className="result-item">
                                 <div className="flex grow align-center">
                                     <div
