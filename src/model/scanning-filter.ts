@@ -1,10 +1,12 @@
+export type PrivateFilterOption = "all" | "only_private" | "only_public";
+
 export interface ScanningFilter {
     readonly showNonFollowers: boolean;
     readonly showFollowers: boolean;
     readonly showVerified: boolean;
-    readonly showPrivate: boolean;
+    readonly privateFilter: PrivateFilterOption; // CHANGED: was showPrivate: boolean
     readonly showWithOutProfilePicture: boolean;
-    // --- ADDED: follower count filter ---
-    readonly minFollowers: number; // 0 = no minimum filter
-    readonly maxFollowers: number; // 0 = no maximum filter
+    // follower count filter
+    readonly minFollowers: number;
+    readonly maxFollowers: number;
 }
