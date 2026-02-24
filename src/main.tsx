@@ -89,10 +89,11 @@ function App() {
                 showNonFollowers: true,
                 showFollowers: false,
                 showVerified: true,
-                privateFilter: "all", // CHANGED: was showPrivate: true
+                privateFilter: "all",
                 showWithOutProfilePicture: true,
                 minFollowers: DEFAULT_MIN_FOLLOWERS,
                 maxFollowers: DEFAULT_MAX_FOLLOWERS,
+                sortOrder: "alphabetical",
             },
         });
     };
