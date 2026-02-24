@@ -89,6 +89,375 @@ function App() {
                 showNonFollowers: true,
                 showFollowers: false,
                 showVerified: true,
+                privateFilter: "all", // CHANGED: was showPrivate: true
+                showWithOutProfilePicture: true,
+                minFollowers: DEFAULT_MIN_FOLLOWERS,
+                maxFollowers: DEFAULT_MAX_FOLLOWERS,
+            },
+        });
+    };
+
+    const handleScanFilter = (e: ChangeEvent<HTMLInputElement>) => {
+        if (state.status !== "scanning") {
+            return;
+        }
+
+        if (state.selectedResults.length > 0) {
+            if (!confirm("Changing filter options will clear selected users")) {
+                setState({ ...state });
+                return;
+            }
+        }
+
+        setState({
+            ...state,
+            selectedResults: [],
+            filter: {
+                ...state.filter,
+                [e.currentTarget.name]: e.currentTarget.checked,
+            },
+        });
+    };
+
+    const handleUnfollowFilter = (e: ChangeEvent<HTMLInputElement>) => {
+        if (state.status !== "unfollowing") {
+            return;
+        }
+
+        setState({
+            ...state,
+            filter: {
+                ...state.filter,
+                [e.currentTarget.name]: e.currentTarget.checked,
+            },
+        });
+    };
+
+    const toggleUser = (newStatus: boolean, user: UserNode) => {
+        if (state.status !== "scanning") {
+            return;
+        }
+
+        if (newStatus) {
+            setState({
+                ...state,
+                selectedResults: [...state.selectedResults, user],
+            });
+        } else {
+            setState({
+                ...state,
+                selectedResults: state.selectedResults.filter(result => result.id !== user.id),
+            });
+        }
+    };
+
+    const toggleAllUsers = (e: ChangeEvent<HTMLInputElement>) => {
+        if (state.status !== "scanning") {
+            return;
+        }
+
+        if (e.currentTarget.checked) {
+            setState({
+                ...state,
+                selectedResults: getUsersForDisplay(
+                    state.results,
+                    state.whitelistedResults,
+                    state.currentTab,
+                    state.searchTerm,
+                    state.filter,
+                ),
+            });
+        } else {
+            setState({
+                ...state,
+                selectedResults: [],
+            });
+        }
+    };
+
+    // it will work the same as toggleAllUsers, but it will select everyone on the current page.
+    const toggleCurrentePageUsers = (e: ChangeEvent<HTMLInputElement>) => {
+        if (state.status !== "scanning") {
+            return;
+        }
+
+        if (e.currentTarget.checked) {
+            setState({
+                ...state,
+                selectedResults: getCurrentPageUnfollowers(
+                    getUsersForDisplay(
+                        state.results,
+                        state.whitelistedResults,
+                        state.currentTab,
+                        state.searchTerm,
+                        state.filter,
+                    ),
+                    state.page,
+                ),
+            });
+        } else {
+            setState({
+                ...state,
+                selectedResults: [],
+            });
+        }
+    };
+
+    const onWhitelistUpdate = (updatedWhitelist: readonly UserNode[]) => {
+        saveWhitelist(updatedWhitelist);
+
+        if (state.status === "scanning") {
+            setState({
+                ...state,
+                whitelistedResults: updatedWhitelist,
+            });
+        }
+    };
+
+    useEffect(() => {
+        const onBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (!isActiveProcess) {
+                return;
+            }
+
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            e = e || window.event;
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+            if (e) {
+                e.returnValue = "Changes you made may not be saved.";
+            }
+
+            // For Safari
+            return "Changes you made may not be saved.";
+        };
+
+        window.addEventListener("beforeunload", onBeforeUnload);
+        return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    }, [isActiveProcess, state]);
+
+    useEffect(() => {
+        const scan = async () => {
+            if (state.status !== "scanning") {
+                return;
+            }
+
+            const results = [...state.results];
+            let scrollCycle = 0;
+            let url = urlGenerator();
+            let hasNext = true;
+            let currentFollowedUsersCount = 0;
+            let totalFollowedUsersCount = -1;
+
+            while (hasNext) {
+                let receivedData: User;
+                try {
+                    receivedData = (await fetch(url).then(res => res.json())).data.user.edge_follow;
+                } catch (e) {
+                    console.error(e);
+                    continue;
+                }
+
+                if (totalFollowedUsersCount === -1) {
+                    totalFollowedUsersCount = receivedData.count;
+                }
+                hasNext = receivedData.page_info.has_next_page;
+                url = urlGenerator(receivedData.page_info.end_cursor);
+                currentFollowedUsersCount += receivedData.edges.length;
+                receivedData.edges.forEach(x => results.push(x.node));
+
+                setState(prevState => {
+                    if (prevState.status !== "scanning") {
+                        return prevState;
+                    }
+
+                    const newState: State = {
+                        ...prevState,
+                        percentage: Math.round((currentFollowedUsersCount / totalFollowedUsersCount) * 100),
+                        results,
+                    };
+                    return newState;
+                });
+
+                // Pause scanning if user requested so.
+                while (scanningPaused) {
+                    await sleep(1000);
+                    console.info("Scan paused");
+                }
+
+                await sleep(Math.floor(Math.random() * (timings.timeBetweenSearchCycles - timings.timeBetweenSearchCycles * 0.7)) + timings.timeBetweenSearchCycles);
+                scrollCycle++;
+                if (scrollCycle > 6) {
+                    scrollCycle = 0;
+                    setToast({ show: true, text: `Sleeping ${timings.timeToWaitAfterFiveSearchCycles / 1000
+                        } seconds to prevent getting temp blocked` });
+                    await sleep(timings.timeToWaitAfterFiveSearchCycles);
+                }
+                setToast({ show: false });
+            }
+            setToast({ show: true, text: "Scanning completed!" });
+        };
+        scan();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.status]);
+
+    useEffect(() => {
+        const unfollow = async () => {
+            if (state.status !== "unfollowing") {
+                return;
+            }
+
+            const csrftoken = getCookie("csrftoken");
+            if (csrftoken === null) {
+                throw new Error("csrftoken cookie is null");
+            }
+
+            let counter = 0;
+            for (const user of state.selectedResults) {
+                counter += 1;
+                const percentage = Math.round((counter / state.selectedResults.length) * 100);
+
+                try {
+                    await fetch(unfollowUserUrlGenerator(user.id), {
+                        headers: {
+                            "content-type": "application/x-www-form-urlencoded",
+                            "x-csrftoken": csrftoken,
+                        },
+                        method: "POST",
+                        mode: "cors",
+                        credentials: "include",
+                    });
+
+                    setState(prevState => {
+                        if (prevState.status !== "unfollowing") {
+                            return prevState;
+                        }
+                        return {
+                            ...prevState,
+                            percentage,
+                            unfollowLog: [
+                                ...prevState.unfollowLog,
+                                {
+                                    user,
+                                    unfollowedSuccessfully: true,
+                                },
+                            ],
+                        };
+                    });
+                } catch (e) {
+                    console.error(e);
+
+                    setState(prevState => {
+                        if (prevState.status !== "unfollowing") {
+                            return prevState;
+                        }
+                        return {
+                            ...prevState,
+                            percentage,
+                            unfollowLog: [
+                                ...prevState.unfollowLog,
+                                {
+                                    user,
+                                    unfollowedSuccessfully: false,
+                                },
+                            ],
+                        };
+                    });
+                }
+
+                if (user === state.selectedResults[state.selectedResults.length - 1]) {
+                    break;
+                }
+
+                await sleep(Math.floor(Math.random() * (timings.timeBetweenUnfollows * 1.2 - timings.timeBetweenUnfollows)) + timings.timeBetweenUnfollows);
+
+                if (counter % 5 === 0) {
+                    setToast({ show: true, text: `Sleeping ${timings.timeToWaitAfterFiveUnfollows / 60000
+                        } minutes to prevent getting temp blocked` });
+                    await sleep(timings.timeToWaitAfterFiveUnfollows);
+                }
+                setToast({ show: false });
+            }
+        };
+        unfollow();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [state.status]);
+
+    let markup: React.JSX.Element;
+    switch (state.status) {
+        case "initial":
+            markup = <NotSearching onScan={onScan}></NotSearching>;
+            break;
+        case "scanning": {
+            markup = <Searching
+                state={state}
+                handleScanFilter={handleScanFilter}
+                toggleUser={toggleUser}
+                pauseScan={pauseScan}
+                setState={setState}
+                scanningPaused={scanningPaused}
+                UserCheckIcon={UserCheckIcon}
+                UserUncheckIcon={UserUncheckIcon}
+            ></Searching>;
+            break;
+        }
+        case "unfollowing":
+            markup = <Unfollowing
+                state={state}
+                handleUnfollowFilter={handleUnfollowFilter}
+            ></Unfollowing>;
+            break;
+        default:
+            assertUnreachable(state);
+    }
+
+    return (
+        <main id="main" role="main" className="iu">
+            <section className="overlay">
+                <Toolbar
+                    state={state}
+                    setState={setState}
+                    isActiveProcess={isActiveProcess}
+                    toggleAllUsers={toggleAllUsers}
+                    toggleCurrentePageUsers={toggleCurrentePageUsers}
+                    setTimings={setTimings}
+                    currentTimings={timings}
+                    whitelistedUsers={state.status === "scanning" ? state.whitelistedResults : loadWhitelist()}
+                    onWhitelistUpdate={onWhitelistUpdate}
+                ></Toolbar>
+                {markup}
+                {toast.show && <Toast show={toast.show} message={toast.text} onClose={() => setToast({ show: false })} />}
+            </section>
+        </main>
+    );
+}
+
+if (location.hostname !== INSTAGRAM_HOSTNAME) {
+    alert("Can be used only on Instagram routes");
+} else {
+    document.title = "InstagramUnfollowers";
+    document.body.innerHTML = "";
+    render(<App />, document.body);
+}
+    const onScan = async () => {
+        if (state.status !== "initial") {
+            return;
+        }
+
+        const whitelistedResults = loadWhitelist();
+
+        setState({
+            status: "scanning",
+            page: 1,
+            searchTerm: "",
+            currentTab: "non_whitelisted",
+            percentage: 0,
+            results: [],
+            selectedResults: [],
+            whitelistedResults,
+            filter: {
+                showNonFollowers: true,
+                showFollowers: false,
+                showVerified: true,
                 showPrivate: true,
                 showWithOutProfilePicture: true,
                 // --- ADDED: follower count filter defaults ---
