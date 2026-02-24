@@ -53,9 +53,15 @@ export function getUsersForDisplay(
                 assertUnreachable(currentTab);
         }
 
-        if (!filter.showPrivate && result.is_private) {
+        // --- CHANGED: privateFilter with 3 options instead of showPrivate boolean ---
+        if (filter.privateFilter === "only_private" && !result.is_private) {
             continue;
         }
+        if (filter.privateFilter === "only_public" && result.is_private) {
+            continue;
+        }
+        // "all" => no filtering, show both
+        // --- END CHANGED ---
 
         if (!filter.showVerified && result.is_verified) {
             continue;
@@ -70,6 +76,111 @@ export function getUsersForDisplay(
         }
 
         if (!filter.showWithOutProfilePicture && WITHOUT_PROFILE_PICTURE_URL_IDS.some(id => result.profile_pic_url.includes(id))) {
+            continue;
+        }
+
+        // Follower count filters
+        if (filter.minFollowers > 0 && result.follower_count !== undefined) {
+            if (result.follower_count < filter.minFollowers) {
+                continue;
+            }
+        }
+
+        if (filter.maxFollowers > 0 && result.follower_count !== undefined) {
+            if (result.follower_count > filter.maxFollowers) {
+                continue;
+            }
+        }
+
+        const userMatchesSearchTerm =
+            result.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            result.full_name.toLowerCase().includes(searchTerm.toLowerCase());
+
+        if (searchTerm !== "" && !userMatchesSearchTerm) {
+            continue;
+        }
+
+        users.push(result);
+    }
+
+    return users;
+}
+
+export function getUnfollowLogForDisplay(log: readonly UnfollowLogEntry[], searchTerm: string, filter: UnfollowFilter) {
+    const entries: UnfollowLogEntry[] = [];
+
+    for (const entry of log) {
+        if (!filter.showSucceeded && entry.unfollowedSuccessfully) {
+            continue;
+        }
+
+        if (!filter.showFailed && !entry.unfollowedSuccessfully) {
+            continue;
+        }
+
+        const userMatchesSearchTerm = entry.user.username.toLowerCase().includes(searchTerm.toLowerCase());
+
+        if (searchTerm !== "" && !userMatchesSearchTerm) {
+            continue;
+        }
+
+        entries.push(entry);
+    }
+
+    return entries;
+}
+
+export function assertUnreachable(_value: never): never {
+    throw new Error('Statement should be unreachable');
+}
+
+export function sleep(ms: number): Promise<any> {
+    return new Promise(resolve => {
+        setTimeout(resolve, ms);
+    });
+}
+
+export function getCookie(name: string): string | null {
+    const value = `; ${document.cookie}`;
+    const parts = value.split(`; ${name}=`);
+    if (parts.length !== 2) {
+        return null;
+    }
+    return parts.pop()!.split(';').shift()!;
+}
+
+export function urlGenerator(nextCode?: string): string {
+    const ds_user_id = getCookie('ds_user_id');
+
+    if (nextCode === undefined) {
+        return `https://www.instagram.com/graphql/query/?query_hash=3dec7e2c57367ef3da3d987d89f9dbc8&variables={"id":"${ds_user_id}","include_reel":"true","fetch_mutual":"false","first":"24"}`;
+    }
+
+    return `https://www.instagram.com/graphql/query/?query_hash=3dec7e2c57367ef3da3d987d89f9dbc8&variables={"id":"${ds_user_id}","include_reel":"true","fetch_mutual":"false","first":"24","after":"${nextCode}"}`;
+}
+
+export function unfollowUserUrlGenerator(idToUnfollow: string): string {
+    return `https://www.instagram.com/web/friendships/${idToUnfollow}/unfollow/`;
+}
+
+export async function fetchFollowerCount(username: string): Promise<number | null> {
+    try {
+        const response = await fetch(
+            `https://www.instagram.com/api/v1/users/web_profile_info/?username=${username}`,
+            {
+                headers: {
+                    'x-ig-app-id': '936619743392459',
+                },
+                credentials: 'include',
+            },
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data?.data?.user?.edge_followed_by?.count ?? null;
+    } catch {
+        return null;
+    }
+}        if (!filter.showWithOutProfilePicture && WITHOUT_PROFILE_PICTURE_URL_IDS.some(id => result.profile_pic_url.includes(id))) {
             continue;
         }
 
