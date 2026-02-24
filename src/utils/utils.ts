@@ -1,7 +1,7 @@
 import { UserNode } from "../model/user";
 import { UNFOLLOWERS_PER_PAGE, WITHOUT_PROFILE_PICTURE_URL_IDS } from "../constants/constants";
 import { ScanningTab } from "../model/scanning-tab";
-import { ScanningFilter } from "../model/scanning-filter";
+import { ScanningFilter, SortOrder } from "../model/scanning-filter";
 import { UnfollowLogEntry } from "../model/unfollow-log-entry";
 import { UnfollowFilter } from "../model/unfollow-filter";
 
@@ -22,8 +22,24 @@ export function getMaxPage(nonFollowersList: readonly UserNode[]): number {
 }
 
 export function getCurrentPageUnfollowers(nonFollowersList: readonly UserNode[], currentPage: number): readonly UserNode[] {
-    const sortedList = [...nonFollowersList].sort((a, b) => (a.username > b.username ? 1 : -1));
-    return sortedList.splice(UNFOLLOWERS_PER_PAGE * (currentPage - 1), UNFOLLOWERS_PER_PAGE);
+    // No sorting here — the list is already sorted by getUsersForDisplay
+    const list = [...nonFollowersList];
+    return list.splice(UNFOLLOWERS_PER_PAGE * (currentPage - 1), UNFOLLOWERS_PER_PAGE);
+}
+
+function applySortOrder(users: UserNode[], sortOrder: SortOrder): UserNode[] {
+    switch (sortOrder) {
+        case "alphabetical":
+            return users.sort((a, b) => (a.username.toLowerCase() > b.username.toLowerCase() ? 1 : -1));
+        case "recent_first":
+            // Keep original API order (most recent follows first)
+            return users;
+        case "oldest_first":
+            // Reverse API order (oldest follows first)
+            return users.reverse();
+        default:
+            return users;
+    }
 }
 
 export function getUsersForDisplay(
@@ -53,15 +69,13 @@ export function getUsersForDisplay(
                 assertUnreachable(currentTab);
         }
 
-        // --- CHANGED: privateFilter with 3 options instead of showPrivate boolean ---
+        // Private filter with 3 options
         if (filter.privateFilter === "only_private" && !result.is_private) {
             continue;
         }
         if (filter.privateFilter === "only_public" && result.is_private) {
             continue;
         }
-        // "all" => no filtering, show both
-        // --- END CHANGED ---
 
         if (!filter.showVerified && result.is_verified) {
             continue;
@@ -103,7 +117,8 @@ export function getUsersForDisplay(
         users.push(result);
     }
 
-    return users;
+    // Apply sort order
+    return applySortOrder(users, filter.sortOrder);
 }
 
 export function getUnfollowLogForDisplay(log: readonly UnfollowLogEntry[], searchTerm: string, filter: UnfollowFilter) {
